@@ -247,3 +247,5 @@ pcaMouse %>%
   coord_fixed() 
 ```
 
+
+
