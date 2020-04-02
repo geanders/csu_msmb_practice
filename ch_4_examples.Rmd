@@ -1,0 +1,148 @@
+---
+title: "Chapter 4 Examples"
+author: "Brooke Anderson"
+date: "2/27/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(purrr)
+```
+
+
+## Mixture of two normals
+
+```{r}
+coin_flips <- tibble(outcome1 = rbinom(n = 10000, size = 1, prob = 0.5)) %>% 
+  mutate(mean_norm = if_else(outcome1 == 0, 1, 3)) %>% 
+  mutate(outcome2 = map_dbl(mean_norm, ~ rnorm(n = 1, mean = .x, sd = 0.5)))
+  
+head(coin_flips)
+```
+
+```{r fig.align = "center", fig.width = 4, fig.height = 3}
+ggplot(coin_flips, aes(x = outcome2)) + 
+  geom_histogram(fill = "purple", binwidth = 0.1)
+```
+
+Plot just for "heads" on initial coin flip: 
+
+```{r fig.align = "center", fig.width = 4, fig.height = 3}
+ggplot(filter(coin_flips, outcome1 == 1), aes(x = outcome2)) + 
+  geom_histogram(aes(y = ..density..), fill = "purple", binwidth = 0.01) + 
+  stat_function(fun = dnorm, args = list(mean = 3, sd = 0.5), color = "red")
+```
+
+Two coins, with probs of heads of 0.125 and 0.25. 
+
+1/8 prob. of picking coin 1:
+
+```{r}
+coin_flips2 <- tibble(outcome1 = rbinom(n = 100, size = 1, prob = 1 / 8)) %>% 
+  mutate(prob_2 = if_else(outcome1 == 0, 0.125, 0.25)) %>% 
+  mutate(outcome2 = map_dbl(prob_2, ~ sum(rbinom(n = 2, size = 1, prob = .x))))
+
+head(coin_flips2)
+coin_flips2 %>% 
+  group_by(outcome2) %>% 
+  count()
+```
+
+1/4 prob. of picking coin 1: 
+
+```{r}
+coin_flips2 <- tibble(outcome1 = rbinom(n = 100, size = 1, prob = 1 / 4)) %>% 
+  mutate(prob_2 = if_else(outcome1 == 0, 0.125, 0.25)) %>% 
+  mutate(outcome2 = map_dbl(prob_2, ~ sum(rbinom(n = 2, size = 1, prob = .x))))
+
+head(coin_flips2)
+coin_flips2 %>% 
+  group_by(outcome2) %>% 
+  count()
+```
+
+Mixture of two normals with mean parameters unknown, standard deviation of 1: 
+
+```{r}
+two_norms <- tibble(u = sample(2, 100, replace = TRUE)) %>% 
+  mutate(mu = if_else(u == 1, -0.5, 1.5)) %>% 
+  mutate(y = map_dbl(mu, ~ rnorm(n = 1, mean = .x, sd = 1)))
+
+head(two_norms)
+
+two_norms %>% 
+  group_by(u) %>% 
+  summarize(n(), 
+            mean(y))
+```
+
+```{r message = FALSE}
+library("mixtools")
+gm <- normalmixEM(two_norms$y, k = 2, lambda = c(0.5, 0.5), 
+                  mu = c(-0.01, 0.01), sigma = c(1, 1))
+gm
+```
+
+## Zea mays example
+
+```{r}
+library("HistData")
+head(ZeaMays)
+```
+
+```{r fig.align = "center", fig.width = 5, fig.height = 3}
+ggplot(ZeaMays, aes(x = diff, ymax = 1 / 15, ymin = 0)) + 
+  geom_linerange(size = 1, col = "forestgreen") + 
+  ylim(0, 0.1)
+```
+
+
+```{r}
+ordered_zm <- ZeaMays %>% 
+  dplyr::select(diff) %>% 
+  arrange(diff) %>% 
+  mutate(index = 1:n() / n())
+
+head(ordered_zm)
+```
+
+```{r fig.align = "center", fig.width = 5, fig.height = 4}
+ggplot(ordered_zm, aes(x = diff, y = index)) + 
+  geom_point()
+```
+
+Bootstrap calc of median:
+ 
+```{r}
+bs_zm <- tibble(index = 1:1000) %>% 
+  mutate(bs_sample = map(index, ~ sample(ZeaMays$diff, replace = TRUE, size = 15))) %>% 
+  mutate(sample_median = map_dbl(bs_sample, median))
+bs_zm
+bs_zm$bs_sample[[1]] 
+bs_zm$bs_sample[[2]]
+```
+
+```{r fig.align = "center", fig.width = 5, fig.height = 3}
+ggplot(bs_zm, aes(x = sample_median)) + 
+  geom_histogram(bins = 30, fill = "purple")
+```
+
+Estimate 99% CI: 
+
+```{r}
+bs_zm %>% 
+  summarize(lower_ci = quantile(sample_median, 0.005), 
+            upper_ci = quantile(sample_median, 0.995))
+```
+
+```{r}
+library(bootstrap)
+bootstrap(ZeaMays$diff, 1000, mean)$thetastar %>% mean() 
+bootstrap(ZeaMays$diff, 1000, median)$thetastar %>% mean()
+```
+

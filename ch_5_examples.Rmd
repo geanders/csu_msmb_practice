@@ -1,0 +1,384 @@
+---
+title: "Chapter 5 examples"
+author: "Brooke Anderson"
+date: "3/4/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(viridis)
+```
+
+
+## Computing distances
+
+```{r}
+ex <- tibble(mx = c(rep(0, 3), rep(1, 3)),
+       my = c(1, 0, 1, 1, 0, 1),
+       mz = c(rep(1, 3), 0, 1, 1))
+ex
+ex %>% 
+  as.matrix() %>%  # Convert the dataframe to a matrix (required input for `dist`) %>% 
+  t() %>%  # Transpose the matrix
+  dist() 
+```
+
+This has created a triangle-shaped object with the "dist" class. Each entry in the 
+triangle gives the distance between one pair of observations. You can easily change the
+distance metric that's calculated for these entries with the `method` parameter. The 
+default is Euclidean distance, but you can also put "maximum", "manhattan", "canberra",
+"binary" or "minkowski".
+
+For example, to incstead calculate the distances using the *binary distance metric*, 
+change the code to: 
+
+```{r}
+ex %>% 
+  as.matrix() %>%  
+  t() %>% 
+  dist(method = "binary") 
+```
+
+With another call to `as.matrix`, you can reconvert from a "dist" class object
+to a matrix: 
+
+```{r}
+ex %>% 
+  as.matrix() %>%  
+  t() %>% 
+  dist(method = "binary") %>% 
+  as.matrix()
+```
+
+Notice that the cells of the triangle get repeated twice in this matrix format. 
+
+## Trying to calculate distance with HIV strains
+
+```{r}
+mut <- read_csv("data/HIVmutations.csv")
+mut
+```
+
+I think that for this each row is a strain and each column is a gene (?), where a "1" 
+indicates a mutation and a "0" indicates none. 
+
+We can use an tile plot to check it out. It'll be easier to do this if you first 
+"pivot" the data to make it longer, like this: 
+
+```{r}
+mut %>% 
+  mutate(index = 1:n()) %>% 
+  pivot_longer(cols = p10F:p95F, names_to = "gene", values_to = "mutation")
+```
+
+In this format, it's easy to make a tile plot (it's easier to see if the strains go
+along the x-axis and the genes along the y-axis): 
+
+```{r fig.height = 7, fig.width = 3, fig.align = "center"}
+mut %>% 
+  mutate(strain = 1:n()) %>% 
+  pivot_longer(cols = p10F:p95F, names_to = "gene", values_to = "mutation") %>% 
+  ggplot(aes(y = gene, x = strain, fill = mutation)) + 
+  geom_tile()
+```
+
+Since the data for each strain is a string of "0"s and "1"s, the binary distance
+metric might make sense here. 
+
+```{r}
+mut %>% 
+  dist(method = "binary")
+```
+
+It looks like strains 1 and 3 are closest. You can also try the Jaccard index: 
+
+```{r}
+library(vegan) # This package has a function for calculating the Jaccard index
+mut %>% 
+  vegdist(method = "jaccard")
+```
+
+In this example, the Jaccard dissimilarity values are exactly the 
+same as the binary distances.
+
+You can also try the correlation-based distance: 
+
+```{r}
+corr_mat_mut <- mut %>% 
+  t() %>% 
+  cor() # Calculates the correlation matrix among values in a matrix
+sqrt(2 * (1 - corr_mat_mut)) %>% # Go from correlation matrix to distance matrix for
+  as.dist()                      # correlation-based distance
+```
+Absolute values are different, but again it looks like strains 1 and 3 are closest.
+
+For any of these, you can plot with a tile plot again: 
+
+```{r fig.align = "center", fig.width = 3, fig.height = 2}
+mut %>% 
+  vegdist(method = "jaccard") %>% 
+  as.matrix() %>% # Can't go straight from a distance class to a tibble, so go through matrix
+  as_tibble() %>% 
+  mutate(strain_1 = 1:n()) %>% # Add a column with strain 1 for each comparison 
+  pivot_longer(cols = 1:5, names_to = "strain_2", values_to = "distance") %>% 
+  mutate_at(vars(strain_1:strain_2), as.numeric) %>% 
+  mutate(distance = ifelse(strain_2 <= strain_1, NA, distance)) %>% 
+  ggplot(aes(x = strain_1, y = strain_2, fill = distance)) + 
+  geom_tile() + 
+  scale_fill_viridis(na.value = "white", direction = -1) + 
+  theme_classic() + 
+  labs(x = "First HIV strain", 
+       y = "Second HIV strain")
+  
+```
+
+## Clustering
+
+This example used the `clusterExperiment` package. It's got a really nice vignette 
+at https://bioconductor.org/packages/release/bioc/vignettes/clusterExperiment/inst/doc/clusterExperimentTutorial.html. 
+
+The example data here is from a single cell RNA sequencing experiment on ...
+
+```{r message = FALSE, warning = FALSE}
+# If you need to install the packages, uncomment the following lines
+# BiocManager::install("clusterExperiment")
+# BiocManager::install("scRNAseq")
+
+library(clusterExperiment)
+library(scRNAseq)
+```
+
+The data used is the "fluidigm" dataset. It has a helpful with the citation to the
+original data (try `?fluidigm` to access that helpfile).
+
+The data's in a "Summarized Experiment" class. You can access the data in that class
+using the `assay` method and the meta-data with `colData`.
+
+```{r}
+data("fluidigm")
+class(fluidigm)
+
+# Check out top left square of data
+# I think columns are samples and rows are genes
+fluidigm %>% 
+  assay() %>% 
+  `[`(1:10, 1:7) # sneaky trick to index out rows 1 to 10 and columns 1 to 7
+
+# Get the start of the metadata
+fluidigm %>% 
+  colData() %>% 
+  head()
+```
+
+This data needs some pre-processing. In the book example, the steps they take are: 
+
+1. Limit to only samples where sequencing depth is "high"
+2. Limit to only genes with at least 10 reads in at least 10 cells
+3. Normalize the data. They use quantile normalization with the 
+`normalizeQuantiles` package from the `limma` package. 
+
+Step 1: 
+
+```{r}
+fluidigm_high <- fluidigm[ , fluidigm$Coverage_Type == "High"]
+fluidigm       # This reduces the samples in the data from 130...
+fluidigm_high  # ... to 65
+```
+
+Step 2: 
+
+```{r}
+high_read_genes <- fluidigm_high %>% 
+  assay() %>% 
+  as_tibble(rownames = NA) %>% 
+  rownames_to_column(var = "gene") %>% 
+  mutate(index = 1:n()) %>% 
+  pivot_longer(-gene) %>% 
+  mutate(over_10 = value > 10) %>% 
+  group_by(gene) %>% 
+  summarize(n_over_10 = sum(over_10)) %>% 
+  dplyr::filter(n_over_10 >= 10) %>% 
+  pull(gene)
+head(high_read_genes)
+fluidigm_high <- fluidigm_high[rownames(fluidigm_high) %in% high_read_genes, ]
+
+fluidigm_high
+```
+
+```{r}
+library(limma)
+norm_counts <- fluidigm_high %>% 
+  assay() %>% 
+  normalizeQuantiles() %>% 
+  round()
+norm_counts %>% 
+  `[`(1:4, 1:4)
+
+# Replace this back into the SummarizeExperiment class object
+assays(fluidigm_high) <- list(normalized_counts = norm_counts)
+```
+
+Now you can do the clustering: 
+
+```{r}
+clus_results <- clusterMany(fluidigm_high, clusterFunction = "pam",
+                            ks = c(5, 7, 9), isCount = TRUE, 
+                            dimReduce = "var",
+                            nVarDims = c(60, 100, 150))
+clus_results
+```
+
+
+## Flow cytometry example
+
+```{r message = FALSE, warning = FALSE}
+library(flowCore)
+library(flowViz)
+fcs_b <- read.FCS("data/Bendall_2011.fcs")
+slotNames(fcs_b)
+```
+
+```{r}
+fcs_b %>% 
+  exprs() %>% 
+  `[`(1:2, )
+```
+
+```{r}
+# Read in a small dataframe that matches the original column
+# names to the CD marker names
+markers_b <- read_csv("data/Bendall_2011_markers.csv")
+markers_b %>% 
+  head()
+
+# Match these up to the column names and then replace the 
+# original column names with these
+mt <- match(markers_b$isotope, colnames(fcs_b))
+colnames(fcs_b)[mt] <- markers_b$marker
+
+# Now you'll see the column names have changed
+fcs_b %>% 
+  exprs() %>% 
+  `[`(1:2, )
+```
+
+
+```{r fig.width = 4.5, fig.height = 4, fig.align = "center"}
+flowPlot(fcs_b, plotParameters = c("Cell_length", "DNA191"), 
+         logy = TRUE)
+```
+
+```{r fig.width = 3, fig.height = 2.5, fig.align = "center"}
+asinhtrsf <- arcsinhTransform(a = 0.1, b = 1) # It looks like this function is making a new function!
+asinhtrsf %>% 
+  class()
+is.function(asinhtrsf)
+
+# Transform the data for all the columns *except* 1, 2, and 41
+fcs_bt <- transform(fcs_b, transformList(colnames(fcs_b)[-c(1, 2, 41)], 
+                                       asinhtrsf))
+# Plot without the transformation
+densityplot(~ `CD3all`, fcs_b)
+
+# Plot without the transformation
+densityplot(~ `CD3all`, fcs_bt)
+```
+
+Look a little more at how this transform works: 
+
+More curved at lower values of x:
+
+```{r fig.width = 3, fig.height = 2.5, fig.align = "center"}
+tibble(x = seq(0, 1, length.out = 100)) %>% 
+  ggplot(aes(log(x), asinh(x))) + 
+  geom_line()
+```
+
+More like a line at higher values of x:
+
+```{r fig.width = 3, fig.height = 2.5, fig.align = "center"}
+tibble(x = seq(30, 3000, length = 100)) %>% 
+  ggplot(aes(log(x), asinh(x))) + 
+  geom_line()
+```
+
+Use k-means for clustering:
+
+```{r}
+# First make the filter. These are "defined by a single flow parameter"
+kf <- kmeansFilter("CD3all" = c("Pop1", "Pop2"), 
+                   filterId = "myKmFilter")
+class(kf)
+
+# Apply the filter to split the data into two populations
+fres <- flowCore::filter(fcs_bt, kf) # Need the :: syntax (`filter`)
+fres
+class(fres)
+summary(fres)
+
+# create objects with each of these two populations
+fcs_bt1 <- flowCore::split(fcs_bt, fres, population = "Pop1") 
+fcs_bt2 <- flowCore::split(fcs_bt, fres, population = "Pop2")
+```
+
+Cluster the cells based on their values for two CD (CD3 and CD56):
+
+```{r fig.height = 4, fig.width = 4.5, fig.align = "center"}
+# Uncomment and run the next line if you need the library
+# BiocManager::install("flowPeaks")
+library("flowPeaks")
+
+fp <- fcs_bt %>% 
+  exprs() %>% 
+  `[`(, c("CD3all", "CD56")) %>% # Pull out two flow parameters
+  flowPeaks() # Cluser all the cells based on the two parameters?
+summary(fp)
+
+# I don't think this plot is giving any of the clustering results...
+plot(fp)
+flowPlot(fcs_bt, plotParameters = c("CD3all", "CD56"), logy = FALSE)
+fcs_bt %>% 
+  `[`(, c("CD3all", "CD56")) %>% 
+  contour(add = TRUE) # Add contour lines to the plot
+```
+
+## Density-based clustering
+
+```{r}
+# Uncomment and run the next line if you need the library
+# BiocManager::install("dbscan")
+library("dbscan")
+mc5 <- fcs_bt %>% 
+  exprs() %>% 
+  `[`(,c("CD4", "CD8", "CD20", "CD3all"))
+mc5 %>% 
+  head()
+```
+
+In the `dbscan` call, `eps` is the "size of the epsilon 
+neighborhood":
+
+```{r fig.height = 4, fig.width = 4.5, fig.align = "center"}
+res5 <- dbscan(mc5, eps = 0.65, minPts = 30)
+res5
+
+mc5df <- mc5 %>% 
+  as_tibble() %>% 
+  mutate(cluster = res5$cluster) %>% 
+  mutate(cluster = forcats::as_factor(cluster))
+head(mc5df)
+
+ggplot(mc5df, aes(x = CD4, y = CD8, color = cluster)) + 
+  geom_density2d()
+
+ggplot(mc5df, aes(x = CD3all, y = CD20, color = cluster)) + 
+  geom_density2d()
+```
+
+
+

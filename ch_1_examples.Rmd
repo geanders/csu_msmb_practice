@@ -1,0 +1,254 @@
+---
+title: "Chapter 1 examples"
+author: "Brooke Anderson"
+date: "2/6/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(purrr)
+library(forcats)
+```
+
+### Example: Mutations in HIV genome with replication
+
+Calculate the chance of three mutations under a Poisson distribution with 
+$\lambda = 5$:
+
+```{r}
+# Using d* function in R
+dpois(x = 3, lambda = 5)
+
+# Using equation for Poisson distribution
+5 ^ 3 * exp(-5) / factorial(3)
+```
+
+Make a probability mass distribution plot for Poisson(5) model (Figure 1.1 in 
+text, but with `tidyverse`):
+
+```{r}
+# Tidyverse version
+pois5_pmd <- tibble(x = 0:12) %>% 
+  mutate(prob_x = dpois(x, lambda = 0.0005 * 10000))
+pois5_pmd
+```
+
+```{r fig.height = 2, fig.width = 3, fig.align = "center"}
+ggplot(pois5_pmd, aes(x = x, y = prob_x)) + 
+  geom_col(fill = "red", color = "black") + 
+  theme_classic() + 
+  theme(axis.title = element_blank())
+```
+
+Here, the Poisson is a reasonable way to approximate a 
+
+```{r}
+# Tidyverse version
+binom_pmd <- tibble(x = 0:12) %>% 
+  mutate(prob_x = dbinom(x, prob = 0.0005, size = 10000))
+binom_pmd
+```
+
+```{r fig.height = 2, fig.width = 3, fig.align = "center"}
+ggplot(binom_pmd, aes(x = x, y = prob_x)) + 
+  geom_col(fill = "red", color = "black") + 
+  theme_classic() + 
+  theme(axis.title = element_blank())
+```
+
+Another way to think through the HIV mutations example: 
+
+```{r}
+hiv_mutations <- tibble(nucleotide_index = 1:10000, 
+                        mutation = sample(c("no mutation", "mutation"), 
+                                          size = 10000,
+                                          replace = TRUE, 
+                                          prob = c(1 - 0.0005, 0.0005)))
+head(hiv_mutations)
+hiv_mutations %>% 
+  group_by(mutation) %>% 
+  count()
+```
+
+Here's an alternative using `rbinom` and letting "0" stand for "no mutation"
+and "1" for "mutation": 
+
+```{r}
+hiv_mutations <- tibble(nucleotide_index = 1:10000, 
+                        mutation = rbinom(10000, prob = 0.0005, size = 1))
+head(hiv_mutations)
+hiv_mutations %>% 
+  group_by(mutation) %>% 
+  count()
+```
+
+If order doesn't matter, you can increase the `size` parameter (number of trials)
+and just get out the count of successes across all those trials: 
+
+```{r}
+rbinom(1, prob = 0.0005, size = 10000)
+```
+
+Simulate this process lots of times---what are "typical" numbers of mutations
+with each replication cycle across the HIV genome?
+
+```{r fig.height = 2, fig.width = 3, fig.align = "center"}
+hiv_simul <- tibble(sim_index = 1:300000,
+                    n_of_mutations = rbinom(300000, prob = 0.0005, size = 10000))
+hiv_simul %>% 
+  group_by(n_of_mutations) %>% 
+  count()
+
+hiv_simul %>% 
+  group_by(n_of_mutations) %>% 
+  count() %>% 
+  ggplot(aes(x = n_of_mutations, y = n)) + 
+  geom_col(fill = "lavender", color = "black") + 
+  theme_classic() + 
+  theme(axis.title = element_blank())
+```
+
+Same, but using a Poisson distribution to approximate, since the probability 
+of success is very low:
+
+```{r fig.height = 2, fig.width = 3, fig.align = "center"}
+hiv_simul <- tibble(sim_index = 1:300000,
+                    n_of_mutations = rpois(300000, lambda = 0.0005 * 10000))
+hiv_simul %>% 
+  group_by(n_of_mutations) %>% 
+  count()
+
+hiv_simul %>% 
+  group_by(n_of_mutations) %>% 
+  count() %>% 
+  ggplot(aes(x = n_of_mutations, y = n)) + 
+  geom_col(fill = "lavender", color = "black") + 
+  theme_classic() + 
+  theme(axis.title = element_blank())
+```
+
+## Example---epitopes with ELISA
+
+Actual data: 
+
+```{r fig.height = 2, fig.width = 3, fig.align = "center"}
+load("data/e100.RData")
+e100
+
+e100_tidy <- tibble(protein_position = 1:100, 
+                    n_pos_epitope_tests = e100)
+head(e100_tidy)
+e100_tidy %>% 
+  ggplot(aes(x = protein_position, y = n_pos_epitope_tests)) + 
+  geom_col(fill = "white", color = "black") + 
+  theme_classic() + 
+  theme(axis.title = element_blank())
+```
+
+Simulate data for 50 patient samples under the null distribution: 
+
+```{r}
+elisa_sim <- tibble(patient_id = 1:50) %>% 
+  mutate(test_results = map(patient_id, ~ rbinom(100, prob = 0.01, size = 1)))
+elisa_sim %>% 
+  slice(1:3)
+elisa_sim$test_results[[1]]
+```
+
+Unnest these results and arrange by position number along the protein: 
+
+```{r}
+elisa_sim <- elisa_sim %>% 
+  unnest(test_results) %>% 
+  mutate(protein_position = rep(1:100, times = 50))
+elisa_sim %>% 
+  slice(1:10)
+```
+
+Get the positive test counts by position and plot a bar chart with those numbers: 
+
+```{r fig.height = 2, fig.width = 3, fig.align = "center"}
+positives_by_position <- elisa_sim %>% 
+  group_by(protein_position) %>% 
+  summarize(n = sum(test_results))
+positives_by_position %>% 
+  slice(1:10)
+ggplot(positives_by_position, aes(x = protein_position, y = n)) + 
+  geom_col(fill = "white", color = "black") + 
+  theme_classic() + 
+  theme(axis.title = element_blank()) + 
+  ylim(c(0, 7))
+```
+
+An even easier approach: 
+
+```{r fig.height = 2, fig.width = 3, fig.align = "center"}
+positives_by_position <- tibble(protein_position = 1:100, 
+                                n_positive = rbinom(100, prob = 0.01, size = 50))
+positives_by_position %>% 
+  slice(1:10)
+ggplot(positives_by_position, aes(x = protein_position, y = n_positive)) + 
+  geom_col(fill = "white", color = "black") + 
+  theme_classic() + 
+  theme(axis.title = element_blank()) + 
+  ylim(c(0, 7))
+```
+
+**Lots** of simulations: 
+
+```{r}
+many_elisa_sims <- tibble(sim_index = 1:20) %>% 
+  mutate(n_positive_by_position = map(sim_index, 
+                                      ~ rbinom(100, prob = 0.01, size = 50))) %>% 
+  unnest(n_positive_by_position) %>% 
+  mutate(protein_position = rep(1:100, times = 20))
+many_elisa_sims %>% 
+  slice(1:10)
+ggplot(many_elisa_sims, aes(x = protein_position, y = n_positive_by_position)) + 
+  geom_col() + 
+  facet_wrap(~ sim_index) + 
+  theme_classic() + 
+  ylim(c(0, 7)) + 
+  theme(axis.title = element_blank())
+```
+
+Same but with Poisson to simulate random values: 
+
+```{r}
+many_elisa_sims <- tibble(sim_index = 1:20) %>% 
+  mutate(n_positive_by_position = map(sim_index, 
+                                      ~ rpois(100, lambda = 0.01 * 50))) %>% 
+  unnest(n_positive_by_position) %>% 
+  mutate(protein_position = rep(1:100, times = 20))
+many_elisa_sims %>% 
+  slice(1:10)
+ggplot(many_elisa_sims, aes(x = protein_position, y = n_positive_by_position)) + 
+  geom_col() + 
+  facet_wrap(~ sim_index) + 
+  theme_classic() + 
+  ylim(c(0, 7)) + 
+  theme(axis.title = element_blank())
+```
+
+## `forcats` alternatives
+
+For factors with more than two levels, the `forcats` package has some nice
+alternatives to base R. 
+
+```{r}
+genotypes <- tibble(genotype = c("AA", "AO", "BB", "AO", "OO", 
+                                 "AO", "AA", "BO", "BO", "AO",
+                                 "BB", "AO", "BO", "AB", "OO",
+                                 "AB", "BB", "AO", "AO")) %>% 
+  mutate(genotype = as_factor(genotype))
+
+genotypes %>% 
+  group_by(genotype) %>% 
+  count()
+```
+

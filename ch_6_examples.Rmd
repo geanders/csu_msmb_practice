@@ -1,0 +1,514 @@
+---
+title: "Chapter 6 examples"
+author: "Brooke Anderson"
+date: "3/12/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(purrr)
+```
+
+
+## Coin flipping example
+
+```{r}
+num_flips <- 100
+p_heads <- 0.6
+
+coin_flips <- tibble(outcome = sample(c("H", "T"), 
+                                      size = num_flips, 
+                                      replace = TRUE, 
+                                      prob = c(p_heads, 1 - p_heads)))
+coin_flips %>% 
+  slice(1:6)
+
+coin_flips %>% 
+  group_by(outcome) %>% 
+  count()
+```
+
+You can create a simple bar chart of the outcome if you want, too:
+
+```{r fig.width = 2, fig.height = 2, fig.align = "center"}
+coin_flips %>% 
+  ggplot(aes(x = outcome)) + 
+  geom_bar()
+```
+
+Next, we can look at how the outcome of our "experiment" compares
+to what we might expect under the null hypothesis over a lot of
+similar experiments if that null hypothesis were true: 
+
+```{r}
+# Get the observed number of heads in our "experiment"
+# Because TRUE is saved as a 1 and FALSE as a 0, we can 
+# count quickly using `sum` on the logical vector testing
+# for heads in the outcome. The parentheses print out the 
+# value of `n_heads_observed` right after it's assigned 
+# (saves me typing it out again to print it).
+(n_heads_observed <- sum(coin_flips$outcome == "H"))
+
+# Next, get the probability of every possible outcome (0 heads, 
+# 1 head, all the way up to all heads). I'm using `map` here from 
+# the `purrr` package. It makes it easy to apply a function 
+# across all the values of another column in the dataframe. 
+# By using the `*_dbl` version of the `map` function, I'm forcing
+# the output to be in the format of a vector of numbers ("doubles":
+# "dbl"). Otherwise, it would give me the output as a "list-column", 
+# which is more complex than we need here.
+binom_density <- tibble(k = 0:num_flips) %>%  # All possible outcomes
+  mutate(p = map_dbl(k, ~ dbinom(.x, size = num_flips, prob = 0.5)))
+
+binom_density %>% 
+  slice(1:5)
+```
+
+```{r fig.width = 2.5, fig.height = 1.5, fig.align = "center"}
+binom_density %>% 
+  ggplot() + 
+  geom_col(aes(x = k, y = p)) +  # In the book, they use `geom_bar` 
+                                 # with `stat = "identity". This 
+                                 # gives the same result, but without
+                                 # having to change the stat from the
+                                 # default
+  geom_vline(xintercept = n_heads_observed, col = "blue")
+```
+
+I think it's kind of interesting to show, instead, shading of the
+observed value *or higher*. You can do that like this:
+
+```{r fig.width = 2.5, fig.height = 1.5, fig.align = "center"}
+# The "Inf" and "-Inf" stand for "infinity". Use these for any of the
+# rectangle boundaries where you don't care where they end (they cover
+# the full plot area in those directions). "geom_rect" is for 
+# rectangle.
+binom_density %>% 
+  ggplot() + 
+  geom_rect(xmin = n_heads_observed, xmax = Inf, 
+            ymin = -Inf, ymax = Inf, 
+            fill = "lightblue") + 
+  geom_col(aes(x = k, y = p)) 
+```
+
+Calculate the same thing using Monte Carlo simulation: 
+
+```{r}
+# They use `replicate`. That's fine, but you could also get this
+# done with a `map` from `purrr` approach. 
+
+sim_outcomes <- tibble(sim_number = 1:10000) %>% 
+  # Note that the formula I'm putting in for the second argument
+  # of the map is exactly the same as the one we used to 
+  # do a single experiment (although in that case our probabilities
+  # were different---now we want to experiment when the coin is
+  # fair). 
+  mutate(simulation = map(sim_number, ~ sample(c("H", "T"), 
+                                               size = num_flips, 
+                                               replace = TRUE, 
+                                               prob = c(0.5, 0.5)))) %>%
+  # That `map` created a list column with the 100 outcomes of 
+  # one experiment (i.e., an experiment of 100 coin flips, and 
+  # the vector gives the list of heads and tails). Now we 
+  # want to determine from that list the number of heads. We 
+  # can map again to do that. Since this is a single number, 
+  # I'm using the `_dbl` version of map to output as a regular
+  # column of numbers
+  mutate(n_heads = map_dbl(simulation, ~ sum(.x == "H")))
+
+# Here's what the dataframe looks like now
+sim_outcomes %>% 
+  slice(1:3)
+
+# And here's what's inside one of the `simulation` column values:
+sim_outcomes %>% 
+  pull(simulation) %>% # `pull` pulls out a column of a dataframe
+  `[[`(1) # Extract the first element of that column
+```
+
+Now you can plot the results of this simulation (which should
+look almost exactly the same as what we got from using the 
+theoretical equation with `dbinom` earlier): 
+
+```{r fig.width = 2.5, fig.height = 1.5, fig.align = "center", warning = FALSE, message = FALSE}
+sim_outcomes %>% 
+  ggplot() + 
+  geom_rect(xmin = n_heads_observed, xmax = Inf, 
+            ymin = -Inf, ymax = Inf, 
+            fill = "lightblue") + 
+  # Since you need to count up the number of "experiments" (i.e., 
+  # simulations) with each outcome, you need to use a histogram
+  # geom instead of a column histogram. Note that the shape of 
+  # this plot will look the same as before, but the y-axis scale
+  # will be different. With a histogram, we've got the number of
+  # cases (out of 10000 simulations) within each bin of number of 
+  # heads, while when we used `dbinom`, we got the probability. If 
+  # you divide all the numbers on the y-axis by 10,000, you should
+  # get things to the same scale
+  geom_histogram(aes(x = n_heads), binwidth = 1) + 
+  xlim(c(0, num_flips)) # Make sure the x-axis covers all possible values
+```
+
+They show how you can use the `binom.test` function for this single
+test (from a single experiment). In this test, you're taking the 
+outcome from your experiment (`r n_heads_observed`, which was
+from a biased coin, but we're assuming now that we don't know that
+and are trying to determine if there's evidence that it's not
+unbiased).
+
+```{r}
+binom_test <- binom.test(x = n_heads_observed, 
+                         n = num_flips, 
+                         p = 0.05)  # This is the probability of 
+                                    # heads under our null hypothesis
+                                    # of an unbiased coin
+
+# You can print the output directly to read the results
+binom_test
+
+# However---and this will be *super* helpful as we move to 
+# making lots of test---you can use the `broom` package's functions
+# to produce tidy output from the test result object
+library(broom)
+binom_test %>% 
+        # So, this is kind of cool... If you're piping into a 
+        # function and you don't need to specify any arguments, 
+        # you can leave off the parentheses. This would have 
+  tidy  # worked equally well with the more traditional `tidy()`.
+```
+
+## t-test
+
+They're using an example dataset from the `datasets` package (I 
+think that comes default with your base R installation) and 
+the `ggbeeswarm` ggplot extension.
+
+```{r}
+library("ggbeeswarm") # This is an extension of ggplot. There are
+                      # loads of these now. Google "ggplot extensions"
+                      # and look for the gallery RStudio has collected
+                      # of some of them to check out more.
+data("PlantGrowth")  # This data has a helpfile at `?PlantGrowth`
+```
+
+Plot the outcomes for the three groups (control, treatment 1, 
+and treatment 2). They're using a beeswarm geom. In this case, there's
+not loads of data, so you don't really see the "swarm"---you probably
+would have been fine with `geom_point`. However, as you move to more
+data, `geom_beeswarm` is really nice in showing points that otherwise
+would overlap and hide each other. I don't like that they used both
+color and position to show the different groups. It's generally 
+better to use just one aesthetic per thing, so that's what I'm doing
+here. Also, it's much better to use clearer labels than "ctrl", "trt1", 
+and "trt2", so I've used a function from the `forcats` package (loads
+as part of `tidyverse`) to change those labels.
+
+```{r fig.height = 2, fig.width = 3, fig.align = "center"}
+PlantGrowth %>% 
+  # You need the backticks for some of these to "protect" the space in
+  # them.
+  mutate(group = fct_recode(group, 
+                            Control = "ctrl", 
+                            `Treatment 1` = "trt1", 
+                            `Treatment 2` = "trt2")) %>% 
+  ggplot(aes(x = group, y = weight)) + 
+  geom_beeswarm() + 
+  labs(x = "") # Really don't need the x-axis label since each group
+               # is now well-labeled
+```
+
+Next, they want to apply a t-test comparing the weights in the control
+group and the treatment 1 group. They use `with`, which (more or less)
+attaches the dataframe for a minute (within the `with` call) so you can
+just refer to column names unstead of having to start everything with
+`PlantGrowth$`. This used to be pretty popular before the tidyverse
+got big, but now most of the tidyverse functions automatically allow
+this kind of non-standard evaluation, so you really don't see `with`
+all that much anymore. 
+
+So, what we want to do here essentially is to input a vector with
+just the weights from the control group as the first argument of
+`t.test` and just the second treatment group as the second argument.
+Without `with`, the classic way to do this would be (notice all the
+`PlantGrowth$`'s!): 
+
+```{r}
+t.test(PlantGrowth$weight[PlantGrowth$group == "ctrl"], 
+       PlantGrowth$weight[PlantGrowth$group == "trt2"], 
+       var.equal = TRUE)
+```
+
+Here's a tidyverse alternative:
+
+```{r}
+PlantGrowth %>% 
+  # Restrict to only the two groups you want to test
+  filter(group %in% c("ctrl", "trt2")) %>% 
+  # Pipe straight into `t.test`. Why not? To do this, you need to use
+  # the "pronoun" `.`. This refers to the dataframe you're currently
+  # piping
+  t.test(weight ~ group, data  = .) 
+```
+
+To get all the way to a tidy output, add a line using `tidy` from the
+`broom` package: 
+
+```{r}
+PlantGrowth %>% 
+  filter(group %in% c("ctrl", "trt2")) %>% 
+  t.test(weight ~ group, data  = .) %>% 
+  # Move back to a tidy dataframe
+  tidy()
+```
+
+Not as pretty to read, but *much* easier to work with to do more stuff
+(plotting, etc.) and for when you're doing multiple tests.
+
+Here's the tidyverse version of duplicating the data by adding
+a second copy of the dataframe before running the t-test: 
+
+```{r}
+PlantGrowth %>% 
+  bind_rows(PlantGrowth) %>% # Add the duplicate of the dataset
+  filter(group %in% c("ctrl", "trt2")) %>% 
+  t.test(weight ~ group, data  = .) %>% 
+  tidy()
+```
+
+Note how the p-value is much lower in this case.
+
+```{r}
+PlantGrowth %>% 
+  sample_frac(size = 0.5) %>% 
+  bind_rows(., .) %>% 
+  filter(group %in% c("ctrl", "trt2")) %>% 
+  t.test(weight ~ group, data  = .) %>% 
+  tidy()
+```
+
+
+```{r}
+pg1 <- PlantGrowth %>% 
+  sample_frac(size = 0.5) 
+pg2 <- pg1 %>% 
+  mutate(noise = rnorm(15, mean = 0, sd = 0.2), 
+         weight = weight + noise) %>% 
+  select(-noise)
+
+pg1 %>% 
+  bind_rows(pg2) %>% 
+  filter(group %in% c("ctrl", "trt2")) %>% 
+  t.test(weight ~ group, data  = .) %>% 
+  tidy()
+```
+
+
+
+## False discovery rate
+
+```{r message = FALSE, warning = FALSE}
+# Uncomment and run the following line if you need to install the package
+# BiocManager::install("DESeq2")
+library("DESeq2")
+
+# Uncomment and run the following line if you need to install the package
+# BiocManager::install("airway")
+library("airway") # For more, run `vignette("airway")`
+data("airway") # For more, run `?airway`
+
+summary(airway)
+class(airway)
+str(airway, max.level = 2) # Check the top levels of the object
+```
+
+It looks like there's some data (maybe meta-data?) in the `colData`
+slot:
+
+```{r}
+airway@colData
+```
+
+The `rowRanges` slot seems to have some data in it...
+
+```{r}
+airway@rowRanges
+```
+
+The `metadata` slot has some information about the experiment:
+
+```{r}
+airway@metadata
+```
+
+To figure out more about this data, I think we'd need to look into
+the help documentation for the class that the data's in
+(`RangedSummarizedExperiment`).
+
+Run the code from the book to test for differential expression 
+for each gene. It looks like this is testing by cell line
+(the helpfile says there are four cell lines; `cell`) and by treatment
+(they are either control or treated with dexamethasone; `dex`).
+
+```{r}
+aw <- DESeqDataSet(se = airway, design = ~ cell + dex)
+aw
+```
+
+Here's more of a summary of the output we get:
+
+```{r}
+str(aw, max.level = 2)
+```
+
+I think that, so far, we've just set up the data in the format we
+need to run the differential expression analysis. I think the next
+step will run the actual analysis: 
+
+```{r}
+aw <- DESeq(aw)
+aw
+```
+
+Looking more at this object:
+
+```{r}
+str(aw, max.level = 2)
+```
+
+It looks like there's a `results` method for this object class that
+will pull out the results we want:
+
+```{r}
+results(aw)
+```
+
+In the text, they pull this out and convert it to a dataframe, while
+also filtering out results where the test result (p-value) is 
+missing. We could do the *whole* process in a pipeline to 
+avoid all this making new objects deal like they do in the book 
+code. I think we could do the whole process like this: 
+
+```{r message = FALSE, warning = FALSE}
+airway %>% 
+  DESeqDataSet(design = ~ cell + dex) %>% # Set up the data
+  DESeq() %>% # Perform the differential expression analysis
+  results() %>% # Extract the results
+  as_tibble() %>%  # Convert to a regular dataframe
+  filter(!is.na(pvalue)) -> airway_diff_expr # You can assign at the end!
+
+airway_diff_expr %>% 
+  # There seems to be `slice` in another loaded package, too, so 
+  # we need to use the `dplyr::` notation to say we want the one from
+  # dplyr
+  dplyr::slice(1:3)
+```
+
+One way to explore the data is to plot histograms of all the columns
+to see how the values are distributed. You can do this pretty easily
+by pivoting all the data to be longer (previously, the function 
+for this was `gather`, but the `tidyr` package has been updated
+to use `pivot_longer`). Then, you can make histograms and facet to
+separate the columns. You should set the scales to "free", since they'll
+likely all be on different scales.
+
+```{r warning = FALSE, message = FALSE}
+airway_diff_expr %>% 
+  pivot_longer(cols = baseMean:padj, 
+               names_to = "column", 
+               values_to = "value") %>% 
+  ggplot(aes(x = value)) + 
+  geom_histogram() + 
+  facet_wrap(~ column, scales = "free")
+```
+
+Let's see how `pvalue` and `padj` compare with the log2FoldChange
+and the test statistic columns: 
+
+```{r message = FALSE, warning = FALSE, fig.height = 2.5, fig.width = 5}
+library(viridis)
+airway_diff_expr %>% 
+  select(pvalue, padj, stat, log2FoldChange) %>% 
+  pivot_longer(cols = pvalue:padj, names_to = "type",
+               values_to = "p") %>% 
+  ggplot(aes(x = log2FoldChange, y = p, color = stat)) + 
+  geom_point(size = 0.2) + 
+  facet_wrap(~ type) + 
+  scale_color_viridis()
+
+# Try with taking the log of the absolute value of the test 
+# statistic, so everything isn't so crowded around the middle 
+# in terms of the color
+airway_diff_expr %>% 
+  select(pvalue, padj, stat, log2FoldChange) %>% 
+  pivot_longer(cols = pvalue:padj, names_to = "type",
+               values_to = "p") %>% 
+  ggplot(aes(x = log2FoldChange, y = p, color = log(abs(stat)))) + 
+  geom_point(size = 0.2) + 
+  facet_wrap(~ type) + 
+  scale_color_viridis()
+```
+
+Make a histogram of the p-values: 
+
+```{r fig.height = 2.5, fig.width = 4}
+# Binwidth we're using in the histogram
+# (also the alpha value we're using, so all counts in the first
+# bin of the histogram are below this value for their p-value)
+alpha <- 0.025
+# Two times the proportion of time that the p-value is over 0.5
+pi0 <- 2 * mean(airway_diff_expr$pvalue > 0.5)
+
+airway_diff_expr %>% 
+  ggplot(aes(x = pvalue)) + 
+  geom_histogram(binwidth = alpha) + 
+  geom_hline(yintercept = alpha * pi0 * nrow(airway_diff_expr), 
+             color = "blue") + 
+  geom_vline(xintercept = alpha, color = "red")
+```
+
+Plot of Benjamini-Hochberg procedure: 
+
+```{r fig.width = 3, fig.height = 2}
+airway_diff_expr %>% 
+  mutate(rank = rank(pvalue))  %>% # Returns the ranks of the pvalues
+  filter(rank <= 7000) %>% # Limit to lowest 7000 p-values
+  ggplot(aes(x = rank, y = pvalue)) + 
+  geom_line() + 
+  geom_abline(slope = 0.10 / nrow(airway_diff_expr), color = "red")
+
+```
+
+A "tidier" way to get the rank of the last (i.e., highest p-value)
+test to reject under the Benjamini-Hochberg procedure ($k_{max}$):
+
+```{r}
+airway_diff_expr %>% 
+  mutate(rank = rank(pvalue))  %>%
+  arrange(rank) %>% 
+  filter(pvalue <= 0.10 * rank / n()) %>% 
+  dplyr::count()
+```
+
+## Local FDR
+
+```{r}
+library("fdrtool")
+
+ft <- airway_diff_expr %>% 
+  pull(pvalue) %>%  # The next function needs a vector, so pull `pvalue`
+  fdrtool(statistic = "pvalue") 
+
+# Check out the resulting object
+str(ft)
+
+ft %>% 
+  `[[`("param")
+```
+
+
+
