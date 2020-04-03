@@ -13,6 +13,67 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 library(tidyverse)
 ```
 
+## Turtles data
+
+```{r}
+turtles <- read_tsv("data/PaintedTurtles.txt")
+turtles
+```
+
+```{r}
+turtles %>% 
+  ggplot(aes(x = length)) + 
+  geom_histogram()
+```
+
+
+```{r}
+turtles %>% 
+  ggplot(aes(x = length, y = width)) + 
+  geom_point()
+```
+
+```{r}
+library(GGally)
+
+turtles %>% 
+  select(-sex) %>% 
+  ggpairs()
+```
+
+## Athletes
+
+```{r}
+library("pheatmap")
+load("data/athletes.RData")
+athletes
+```
+
+```{r}
+athletes %>% 
+  ggpairs()
+```
+
+```{r}
+athletes %>% 
+  cor() %>% 
+  pheatmap(cell.width = 10, cell.height = 10)
+```
+
+## Cell types
+
+```{r}
+load("data/Msig3transp.RData")
+head(Msig3transp)
+dim(Msig3transp)
+```
+
+```{r}
+Msig3transp %>% 
+  t() %>% 
+  cor() %>% 
+  pheatmap() 
+```
 
 ## Weighted PCA example (7.8.3)
 
