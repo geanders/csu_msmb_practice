@@ -53,16 +53,21 @@ You can explore the data a bit:
 # See how many rows and columns the data has
 counts %>% 
   dim()
+```
 
+```{r}
 # See a summary of each column
 counts %>% 
   summary()
+```
 
+```{r}
 # See a random sample of 5 rows
 counts %>% 
   sample_n(size = 5)
-  
+``` 
 
+```{r}
 # Check out the unique letters in the gene names 
 # (i.e., once you take out all the digits at the end)
 counts %>% 
@@ -122,6 +127,26 @@ counts %>%
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
+Check typical count levels (for genes with highest levels) by sample. 
+
+```{r message = FALSE}
+library(purrr)
+library(viridis)
+counts %>% 
+  pivot_longer(-gene_id, names_to = "sample_id", values_to = "value") %>% 
+  # Get top 40 genes in terms of mean expression
+  group_by(gene_id) %>% 
+  nest() %>% 
+  mutate(mean = map_dbl(data, ~ mean(.x$value))) %>% 
+  ungroup() %>% 
+  top_n(n = 40) %>% 
+  select(-mean) %>% 
+  unnest(data) %>% 
+  ggplot(aes(x = sample_id, y = gene_id, fill = value)) + 
+  geom_tile() + 
+  scale_fill_viridis()
+```
+
 Read in the meta-data for these data. The meta-data are available in a different
 file in the `padilla` package ("pasilla_sample_annotation.csv").
 
@@ -171,6 +196,8 @@ pasillaSampleAnno %>%
   # Use `kable` from the `knitr` package to output as a pretty table
   knitr::kable()
 ```
+
+
 
 Create a `DESeqDataSet` object with both the measurements (from `counts`) and 
 the meta-data (from `pasillaSampleAnno`). This *data container* is a special 
