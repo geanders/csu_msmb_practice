@@ -281,6 +281,7 @@ tree data:
 # The default is to assume a shape parameter of 1 for the gamma distribution
 # and a rate of 1
 pml(tree = tree1, data = sim_tree1, k = 4)
+pml(tree = tree_nj, data = sim_tree1, k = 4)
 ```
 
 
@@ -562,9 +563,10 @@ customize their appearance:
 ```{r}
 g1 %>% 
   ggnetwork() %>% 
-  rownames_to_column(var = "vertex.names") %>% 
   ggplot(aes(x = x, y = y, xend = xend, yend = yend)) + 
   geom_edges() + 
-  geom_nodes(aes(x = x, y = y), size = 6, color = "dodgerblue") 
+  geom_nodes(aes(x = x, y = y), size = 6, color = "dodgerblue") + 
+  ggtitle("My title") + 
+  theme_void()
 ```
 
